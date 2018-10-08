@@ -1,0 +1,1355 @@
+<!--
+Copyright (c) 2018 NVIDIA Corporation 
+Author: Bryce Adelstein Lelbach <brycelelbach@gmail.com>
+
+Distributed under the Boost Software License v1.0 (boost.org/LICENSE_1_0.txt)
+-->
+<pre class='metadata'>
+Title: Type Requirements for `&lt;numeric&gt;` Algorithms
+H1: Type Requirements for <code>&lt;numeric&gt;</code> Algorithms
+Shortname: P0571
+Revision: 2
+Status: P
+Group: WG21
+Audience: LWG, LEWG, SG1
+Editor: Bryce Adelstein Lelbach, NVIDIA, brycelelbach@gmail.com
+URL: https://wg21.link/P0571R2
+!Source: <a href="https://github.com/brycelelbach/wg21_p0571_type_requirements_for_numeric_algorithms/blob/master/type_requirements_for_numeric_algorithms.bs">GitHub</a>
+Issue Tracking: GitHub https://github.com/brycelelbach/wg21_p0571_type_requirements_for_numeric_algorithms/issues
+Metadata Order: Author, This Version, Source, Issue Tracking, Project, Audience
+Markup Shorthands: markdown yes
+No Abstract: yes
+Toggle Diffs: yes
+Boilerplate: style-syntax-highlighting off
+</pre>
+
+<style>
+pre {
+  margin-top: 0px;
+  margin-bottom: 0px;
+}
+.ins, ins, ins *, span.ins, span.ins * {
+  background-color: rgb(200, 250, 200);
+  color: rgb(0, 136, 0);
+  text-decoration: none;
+}
+.del, del, del *, span.del, span.del * {
+  background-color: rgb(250, 200, 200);
+  color: rgb(255, 0, 0);
+  text-decoration: line-through;
+  text-decoration-color: rgb(255, 0, 0);
+}
+math, span.math {
+  font-family: serif;
+  font-style: italic;
+}
+ul {
+  list-style-type: "— ";
+}
+blockquote {
+  counter-reset: paragraph;
+}
+div.numbered, div.newnumbered {
+  margin-left: 2em;
+  margin-top: 1em;
+  margin-bottom: 1em;
+}
+div.numbered:before, div.newnumbered:before {
+  position: absolute;
+  margin-left: -2em;
+  display-style: block;
+}
+div.numbered:before {
+  content: counter(paragraph);
+  counter-increment: paragraph;
+}
+div.newnumbered:before {
+  content: "�";
+}
+div.numbered ul, div.newnumbered ul {
+  counter-reset: list_item;
+}
+div.numbered li, div.newnumbered li {
+  margin-left: 3em;
+}
+div.numbered li:before, div.newnumbered li:before {
+  position: absolute;
+  margin-left: -4.8em;
+  display-style: block;
+}
+div.numbered li:before {
+  content: "(" counter(paragraph) "." counter(list_item) ")";
+  counter-increment: list_item;
+}
+div.newnumbered li:before {
+  content: "(�." counter(list_item) ")";
+  counter-increment: list_item;
+}
+</style>
+
+# Overview # {#overview}
+
+For over a decade, the C++ standard library algorithms in the `<numeric>`
+header have had insufficient or unclear type requirements. This paper
+identifies some of the issues and proposes potential solutions.
+
+<b><a href="http://i.imgur.com/4DyiKDv.png">This chart</a></b> provides an
+overview of the current state of the type requirements of the
+<code>&lt;numeric&gt;</code> algorithms.
+
+<b>This proposal is not intended to change the existing design, specify any
+previous unspecified behavior which major implementations do not already
+conform to, or remove functionality. It simply clarifies and improves the
+specification of the <code>&lt;numeric&gt;</code> algorithms.</b>
+
+## Kinds of Algorithms in <code>&lt;numeric&gt;</code> ## {#algorithm_kinds}
+
+There are three kinds of algorithms in <code>&lt;numeric&gt;</code>:
+
+  - `accumulate`, `inner_product`, `partial_sum` and `adjacent_difference` have "in-order-accumulator" style wording.
+  - `exclusive_scan`, `inclusive_scan`, `transform_exclusive_scan`, `transform_inclusive_scan` are specified using `GENERALIZED_NONCOMMUTATIVE_SUM`.
+  - `reduce`, `transform_reduce` are specified via `GENERALIZED_SUM`.
+
+## In-Order-Accumulator Algorithms ## {#in_order_accumulator}
+
+The wording for all of these algorithms fits the following pattern: 
+
+  - Create an `acc` object which is initialized with `init` if the algorithm
+      signature contains an initial value parameter and `*first` otherwise.
+  - For (the) iterator(s) in the range(s) **in order**, modify `acc` by applying
+      a binary update operation which takes `acc` and the dereferenced value(s)
+      of the iterator(s) as arguments: e.g. `acc = binary_op(acc, *i)`.
+
+The ordering requirement is necessary to ensure that these algorithms are
+well-defined for **non-associative** and/or **non-commutative** operations, such as
+floating-point addition and multiplication (non-associative and commutative),
+and subtraction (non-associative and non-commutative).
+
+Currently, the wording forces each iteration to depend on the prior iteration
+to ensure the correct ordering of accumulation. This introduces a loop-carried
+dependency that makes it impossible to parallelize.
+
+## `GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM` Algorithms ## {#gnsum_and_gsum}
+
+To parallelize these operations, we need to be able to re-order applications of
+the operations, partition the workload into sub-tasks and then combine the
+results of the sub-tasks together using the operator.
+
+This, however, would give a nondeterministic result for non-associative or
+non-commutative operations; for example, floating point arithmetic.
+
+In addition to adding entirely new <code>&lt;numeric&gt;</code> algorithms, the
+Parallelism TS introduced new algorithms which perform the same operations as
+`accumulate`, `inner_product` and `partial_sum`, but have weaker constraints
+that allow parallelization:
+
+* `reduce` is a parallelizable variant of `accumulate` and `transform_reduce` is
+    a parallelizable variant `inner_product`. They may produce nondeterministic
+    results for non-associative or non-commutative operations.
+* `inclusive_scan` is a parallelizable variant of `partial_sum`. It may produce
+    nondeterministic results for non-associative operations, but is fine for
+    non-commutative operations.
+
+These <code>&lt;numeric&gt;</code> algorithms are specified in 
+<a href="http://eel.is/c++draft/numerics.defns">[numerics.defns]</a>
+using `GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM`:
+
+<blockquote>
+<b>24.2 Definitions <span style="float: right;">[numerics.defns]</span></b>
+
+<div class="numbered">
+Define <code>GENERALIZED_NONCOMMUTATIVE_SUM(op, a1, ..., aN)</code> as follows:
+
+<ul>
+<li><code>a1</code> when `N` is `1`, otherwise either</li>
+<li><code>op(GENERALIZED_NONCOMMUTATIVE_SUM(op, a1, ..., aK), GENERALIZED_NONCOMMUTATIVE_SUM</code> for any `K` where `1 < K + 1 = M ≤ N`, or
+</ul>
+</div>
+
+<div class="numbered">
+Define <code>GENERALIZED_SUM(op, b1, ..., bN)</code> where `b1, ..., bN` may be any permutation of `a1, ..., aN`.
+</blockquote>
+
+This definition allows:
+
+* Arbitrary, nested partitioning of input elements for both `GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM`. 
+* Arbitrary reordering of input elements for `GENERALIZED_SUM`.
+
+# What Should the Intermediate Type Be? # {#intermediate}
+
+During computation of the final result, a <code>&lt;numeric&gt;</code>
+algorithm needs to store the result of accumulation thus far in temporary
+objects. The **intermediate type** is the type of these objects. Importantly,
+these temporary objects are passed as the first argument to the binary
+operator. For the accumulator-style <code>&lt;numeric&gt;</code> algorithms
+(`accumulate`, `inner_product`, `partial_sum`, `adjacent_difference`), the
+intermediate type is the type of the accumulator object `acc`.
+
+The intermediate type is only clearly specified for 2 of the 10
+<code>&lt;numeric&gt;</code> algorithms. Determining and specifiying the
+intermediate type for these algorithms is our first step because the type
+requirements all revolve around the intermediate type.
+
+## Intermediate Type for Ordered <code>&lt;numeric&gt;</code> Algorithms with Initial Value Parameters ## {#intermediate_ordered_ivp}
+
+`accumulate` and `inner_product` are described by the standard in
+<a href="http://eel.is/c++draft/accumulate">[accumulate]</a> and
+<a href="http://eel.is/c++draft/inner.product">[inner.product]</a>. Today, the
+definitions don't make it clear what the intermediate type is. 
+Both algorithms have a requirement that the type of the initial value
+parameter (`T`) be `CopyConstructible` and `CopyAssignable`, implying that the
+accumulator object is intended to be of type `T`. Both libc++ and libstdc++
+use `T` as the type of the accumulator object for these 2 algorithms.
+
+Using `T` both has upsides: 
+
+```
+vector<int> i{INT_MAX, INT_MAX};
+big_int bi = accumulate(d.begin(), d.end(), big_int(0));
+// big_int is an arbitrary-precision integer class which uses dynamic storage.
+
+// bi == 2 * INT_MAX.
+```
+
+and downsides: 
+
+```
+vector<double> d{0.5, 0.5};
+double r = accumulate(d.begin(), d.end(), 0);
+
+// r == 0, not 1. The accumulator's type was int, since the type of the literal
+// 0 is int.
+```
+
+Alternative choices for the intermediate type are:
+
+* Determine some common type between `T`, `InputIterator`'s value type, and
+    the result of `binary_op` (or the relevant operator) and use that as the
+    intermediate type. As discussed in [[#intermediate_ordered_noivp]], it may be
+    difficult to do this if binary_op is overloaded in a certain manner and it
+    may make it harder for users to determine what the intermediate type will be.
+* Use the `InputIterator`'s value type as the intermediate type. This would make
+    the example of accumulating a `vector<double>` produce a result that might
+    be closer to what the user intended, but it would also remove the
+    functionality desired by the user in the `big_int` example.
+
+Switching to either of these alternatives would force implementations to make
+breaking changes, and neither option seems particular attractive.
+
+I suggest adopting the following design. It is simple and clear to both users
+and implementators:
+
+<blockquote><b>
+<code>&lt;numeric&gt;</code> algorithms which take an initial value parameter
+and initial value type template parameter will use the initial value type as
+the intermediate type.
+</blockquote></b>
+
+## Intermediate Type for Ordered <code>&lt;numeric&gt;</code> Algorithms without Initial Value Parameters ## {#intermediate_ordered_noivp}
+
+As we mentioned earlier, the type of the accumulator object (the intermediate
+type) is explicitly specified for only 2 of the 10 <code>&lt;numeric&gt;</code>
+algorithms: `partial_sum`, which is specified in
+<a href="http://eel.is/c++draft/partial.sum">[partial.sum]</a>,
+and `adjacent_difference`, which is specified in
+<a href="http://eel.is/c++draft/adjacent.difference">[adjacent.difference]</a>..
+
+The only alternative to using `InputIterator`'s value type for the intermediate
+type that I could think of was computing the common type of the
+`InputIterator`'s value type and the result of the right-hand side of the
+repeated assignment to acc, e.g.
+
+```
+using it_value_type = typename iterator_traits<InputIterator>::value_type;
+
+// The accumulator type, determined via common_type.
+using acc_common_type = common_type_t<
+    it_value_type
+  , decltype(binary_op(it_value_type{}, *i))
+    // Or acc + *i, or acc - *i, etc. 
+>
+```
+
+If the `InputIterator`'s value type is convertible to the result of the binary
+operator, but the result of the binary operator is not convertible to the
+`InputIterator`'s value type, then the binary operator signature we tested with
+`decltype` cannot be called with `acc_common_type` as its first argument:
+
+```
+struct A { };
+struct B { operator A(); };
+
+struct binary_op_type
+{
+    A   operator() (B, B);
+};
+
+binary_op_type binary_op;
+ 
+using it_value_type = B; 
+
+using acc_common_type = common_type_t<
+    it_value_type
+  , decltype(binary_op(it_value_type{}, it_value_type{}))
+>;
+
+int main()
+{
+    binary_op(acc_common_type{}, it_value_type{}); // COMPILE FAIL.
+}
+```
+
+Even worse, we could have a `binary_op` like this:
+
+```
+struct binary_op_type
+{
+    A   operator() (B, B);
+    int operator() (A, B);
+};
+```
+
+The above `binary_op` can now be called with `acc_common_type` as the first
+argument, however that overload returns a different type which we did not
+include in our common type computation. Nor could we have, as an iterative
+TMP search for a common type would be dangerous in the face of potential
+cycles:
+
+```
+struct binary_op_type
+{
+    A   operator() (B, B); // New expression binary_op(A{}, B{}) to check...
+    B   operator() (A, B); // New expression binary_op(B{}, B{}) to check...
+};
+```
+
+This might be viable if we constrain `binary_op` in some fashion, but it is not
+clear to me how that could be done. More importantly, determining a common type
+to use for the intermediate type is likely the wrong thing to do because it means
+the user does not have a clear answer to the question "What type will you use to
+perform the accumulation?".
+
+Since the `OutputIterator` has no value type by virture of being an output
+iterator, I cannot think of any other options for the intermediate type for the
+algorithms without initial value parameters other than the status quo of the
+`InputIterator`'s value type.
+
+There is, however, a regretable lack of functionality with the status quo prior
+to C++17:
+
+```
+vector<float> f{FLT_MAX, FLT_MAX};
+vector<double> d; 
+partial_sum(f.begin(), f.end(), back_inserter(d)); 
+// d[1] == inf since the intermediate type is float (the value type of
+// vector<float>::iterator).
+```
+
+Pre C++17, there is no way for users to specify that `partial_sum` should use
+a particular type as the intermediate type instead of the `InputIterator`'s
+value type. In C++17, there are two ways this can be done if ordered
+is not needed. `inclusive_scan`, the unordered counterpart of `partial_sum`,
+has overloads which take an initial value:
+
+```
+vector<float> f{FLT_MAX, FLT_MAX};
+vector<double> d; 
+inclusive_scan(f.begin(), f.end(), back_inserter(d), plus<>{}, double{0.0});
+// d[1] == 2 * FLT_MAX
+```
+
+or with `transform_inclusive_scan` using a transform function that converts
+its argument and returns the desire type:
+
+```
+vector<float> f{FLT_MAX, FLT_MAX};
+vector<double> d; 
+transform_inclusive_scan(f.begin(), f.end(), back_inserter(d)
+                       , plus<>{}
+                       , [](float f) { return double{f}; });
+// d[1] == 6e38F.
+```
+
+A possible post-C++17 addition of `partial_sum` signatures accepting an initial
+value parameter would complete this functionality.
+
+I believe the best option is to keep the existing behavior for
+<code>&lt;numeric&gt;</code> algorithm which do not take an initial value
+parameter.  Making any change to the type of the accumulator object would be a
+breaking change as `parital_sum` and `adjacent_difference` are currently
+specified to use accumulator objects whose type is the `InputIterator`'s value
+type, and none of the alternatives offer much benefit. The current behavior is
+clear and easy to understand.
+
+So, I propose:
+
+<blockquote><b>
+<code>&lt;numeric&gt;</code> algorithms which do not take an initial value
+parameter and initial value type template parameter will use the value type of
+their input iterator type as the intermediate type.
+</blockquote></b>
+
+## Intermediate Type for Unordered <code>&lt;numeric&gt;</code> Algorithms ## {#intermediate_unordered}
+
+Unlike the ordered algorithms, the new unordered algorithms from the
+Parallelism TS v1 do not use in-order-accumulator wording. Instead, they are
+all specified in terms of `GENERALIZED_NONCOMMUTATIVE_SUM` and
+`GENERALIZED_SUM` ([[#gnsum_and_gsum]]).
+ 
+As an example of how these definitions are used, let's take a look at `reduce`,
+which is defined in <a href="http://eel.is/c++draft/reduce">[reduce]</a>.
+This definition does not clearly state what the intermediate type (e.g. the
+return type of `GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM`) should
+be.
+
+This is particularly scary in the face of the arbitrary reordering and partitioning
+that `GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM` allow. Consider:
+
+```
+vector<int> i{INT_MAX, INT_MAX, INT_MAX, INT_MAX};
+big_int bi = reduce(d.begin(), d.end(), big_int(0));
+
+// Possible result
+// GSUM == GENERALIZED_SUM, GNSUM == GENERALIZED_NONCOMMUTATIVE_SUM
+//
+//   bi = GSUM(operator+, big_int(0), d[0], d[1], d[2], d[3]);
+//      = operator+(GNSUM(operator+, d[0], big_int(0))
+//                , GNSUM(operator+, d[1], d[2], d[3]));
+//      = operator+(
+//          operator+(
+//            GNSUM(operator+, d[0]), GNSUM(operator+, big_int(0))
+//          )
+//        , operator+(
+//            GNSUM(operator+, d[1], d[2]), GNSUM(operator+, d[3])
+//          )
+//        );
+//      = operator+(
+//          operator+(d[0], big_int(0))
+//        , operator+(
+//            operator+(GNSUM(operator+, d[1]), GNSUM(operator+, d[2])), d[3]
+//          )
+//        );
+//      = operator+(
+//          operator+(d[0], big_int(0))
+//        , operator+(operator+(d[1], d[2]), d[3])
+//        );
+//      = ((d[0] + big_int(0)) + ((d[1] + d[2]) + d[3]));
+//      = ((d[0] + big_int(0)) + ((int{INT_MAX} + int{INT_MAX}) + d[3]));
+//      = ((d[0] + big_int(0)) + (int{-2} + int{INT_MAX}));
+//      = ((int{INT_MAX} + big_int(0)) + int{INT_MAX - 2});
+//      = (big_int(INT_MAX) + int{INT_MAX - 2});
+//      = big_int(INT_MAX + INT_MAX - 2);
+//
+//   bi = 2 * INT_MAX - 2; // Instead of 4*INT_MAX
+```
+
+The above is just one possible result that `reduce` could produce in such an
+example. Note that in addition to performing some of the calculations with
+`int` as the intermediate type, `reduce` also called `binary_op` with the
+initial value type as the **second** argument and the element from the sequence
+(whose type is the `InputIterators`'s value type) as the **first** argument.
+The ordered algorithms always pass intermediate objects as the first argmuent
+to the binary operator. It seems sensible that we should use the same rules I
+suggested for the ordered algorithms ([[#intermediate_policy]]). Note that the
+`N == 1` case intentionally does not convert to `IntermediateType`,
+
+The question is how should this be done? The first thing I tried was to simply
+add a type parameter to `GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM` and
+specify that the type parameter is the return type. However, because of the
+recursive definition, this approach would force every input element to be
+converted to `IntermediateType`. Revisiting our example of reducing into a
+`big_int` illustrates the problem:
+
+```
+vector<int> i(N, INT_MAX); // N is divisible by 2.
+big_int bi = reduce(par, d.begin(), d.end(), big_int(0));
+// big_int is an arbitrary-precision integer class which uses dynamic storage.
+```
+
+Suppose we execute this code on a system with two cores and our implementation decides to use two threads. We would want the following to happen:
+
+0. Partition the work into two chunks - say init (which is `big_int(0)`) and `d[0]` through `d[N / 2 - 1]` in the first chunk, and `d[N / 2]` through `d[N - 1]` in the second trunk.
+0. On one thread, sequentially accumulate the first chunk into `init` (passed by value, so we can use it), using the accumulator-in-order semantics. E.g. modify `init` with `init = binary_op(acc, d[i])` for every `i` in `[0, N / 2)` in order.
+3. On the second thread, create an accumulator object `acc` whose type is the the type of the initial value parameter (`T`) and initialize it with `d[N / 2]`. Then, modify `acc` with `acc = binary_op(acc, d[i])` for every `i` in `[N / 2 + 1, N)` in order. Note that we exclude `N / 2` since we initialized `acc` with the value of `d[N / 2]`.
+
+With the definition of reduce in C++17, we could arguably get this behavior.
+Although the current definition of `GENERALIZED_NONCOMMUTATIVE_SUM` and
+`GENERALIZED_SUM` are fully recursive down to a single element, the intention
+was to allow recursion to be replaced with sequential, in-order-accumulator
+style semantics at an implementation’s discretion for chunks of work that will
+be done on a single thread, the `seq` execution policy, and inputs that an
+implementation decides not to parallelize. Under the current wording, it
+certainly seems like this would be an allowable as-if optimization.
+
+But the new definition I suggested would require every element to be converted
+to `big_int`, which we have noted is an arbitrary precision type which uses
+dynamic storage. These conversions are undesirable, and arguably, unnecessary.
+We only want to ensure that any time the implementation uses a temporary object
+to accumulate some part of the result, that object’s type is the desired
+intermediate type and a conversion happens if necessary (e.g. if the object is
+not the `init` parameter).
+
+I don’t believe we can specify that behavior without changing the definitions
+of `GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM` to explicitly allow
+the sequential accumulation of sub-partitions at the implementation’s
+discretion.
+
+## Intermediate Type Policy for <code>&lt;numeric&gt;</code> Algorithms ## {#intermediate_policy}
+
+In summary: 
+
+<blockquote>The intermediate type is the initial value type if there is an
+initial value, and the value type of the `InputIterator`
+otherwise.</blockquote>
+
+# Type Requirements # {#type_reqs}
+
+Now that we have defined a clear policy for what the intermediate type should
+be for each <code>&lt;numeric&gt;</code> algorithm
+([[#intermediate_policy]]), we can describe their requirements:
+
+* Operators shall neither modify elements nor invalidate iterators or subranges in the iterator ranges specified by their parameters.
+* The intermediate type shall be CopyConstructible (in-order-accumulator algorithms that take an initial value), constructible from `*first` (in-order-accumulator algorithms that do not take an initial value), or constructible from `op(GENERALIZED_NONCOMMUTATIVE_SUM(op, a1, ..., aK), GENERALIZED_NONCOMMUTATIVE_SUM(op, aM, ..., aN))` (`GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM` algorithms). This requirement comes from the initialization of the accumulator object (in-order accumulator algorithms) or from the conversion to `IntermediateType` (`GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM` algorithms).
+* The right hand side of the update expression must be convertible to the intermediate type (all in-order-accumulator algorithms). This requirement comes from the update expression (the right hand side of `acc = binary_op(acc, *i)`).
+* The intermediate type must be CopyAssignable (all in-order-accumulator algorithms except adjacent_difference) or MoveAssignable (adjacent_difference). This requirement comes from the update expression (the assignment in `acc = binary_op(acc, *i)`).
+* The intermediate type shall be writable to the result output iterator (for algorithms which take an output range). This requirement comes from the write to the output iterator that is performed each iteration in these algorithms.
+
+For the function objects, we've already specified the requirements for what the return type of the invocations of `binary_op` should be. We just need to require that:
+
+* `binary_op`, `binary_op1`, `binary_op2` and `unary_op` are function objects.
+* `binary_op(acc, *i)` (all in-order-accumulator algorithms), `acc + *i` (`accumulate`, `inner_product` and `partial_sum`), `acc - *i` (`adjacent_difference`), `binary_op1(acc, binary_op2(*i1, *i2))` (`inner_product`) and `acc + (*i1) * (*i2)` are required.
+* The function object requirements from the new algorithms are in `GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM`:
+    * If `a1, ..., aN` are of the same type (e.g. the homogeneous elements of an iterator range), then `op(a1, a1)` is the only signature required by `GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM`. This covers the new algorithms which do not take an initial value type.
+    * If `a1` is of one type and `a2, ..., aN` are of the same type (e.g. an initial value `a1` and the homogeneous elements of an iterator range `a2, ..., aN`), then `op(a2, a1)`, `op(a1, a2)`, `op(a2, a2)` and `op(a1, a1)` are required by `GENERALIZED_SUM` and `op(a2, a1)`, `op(a2, a2)` and `op(a1, a1)` are required for `GENERALIZED_NONCOMMUTATIVE_SUM`. This covers the new algorithms which do take an initial value type.
+
+<!--
+* `BinaryOperation` (excluding `inner_product` and `transform_reduce`) shall:
+    * Be callable with two arguments, the first whose type is the intermediate type and the second whose type is the InputIterator's value type.
+        * The result of such a call shall be convertible to the intermediate type. This is covered by the RHS requirement above.
+    * Also be callable with two arguments both of whose type is the intermediate type (`GENERALIZED_SUM` and `GENERALIZED_NONCOMMUTATIVE_SUM` algorithms only).
+        * The result of such a call shall be convertible to the intermediate type.
+* `BinaryOperation1` and `BinaryOperation2` (`inner_product` and `transform_reduce` with a binary transform):
+    * `BinaryOperation2` shall be callable with two arguments whose type is the `InputIterator`'s value type.
+    * `BinaryOperation1` shall be callable with two arguments, the first whose is the intermediate type and the second whose type is the type of the result of the above call to `BinaryOperation2`.
+        * The result of such a call shall be convertible to the intermediate type. 
+    * Also, `BinaryOperation1` shall be callable with two arguments both of whose type is the intermediate type (`GENERALIZED_SUM` and `GENERALIZED_NONCOMMUTATIVE_SUM` algorithms only).
+        * The result of such a call shall be convertible to the intermediate type. 
+* `BinaryOperation` and `UnaryOperation` (`transform_reduce` with a unary transform):
+    * `UnaryOperation` shall be callable with one arguments whose type is the `InputIterator`'s value type.
+    * `BinaryOperation` shall be callable with two arguments, the first whose type is the intermediate type and the second whose type is the type of the result of the above call to `UnaryOperation`.
+        * The result of such a call shall be convertible to the intermediate type. 
+    * Also, `BinaryOperation` shall be callable with two arguments both of whose type is the intermediate type (`GENERALIZED_SUM` and `GENERALIZED_NONCOMMUTATIVE_SUM` algorithms only).
+        * The result of such a call shall be convertible to the intermediate type. 
+-->
+
+While the new algorithms introduced by the Parallelism TS do have the necessary
+requirements forbidding modification of iterator ranges, the ranges used are 
+not fully closed like the rest of the <code>&lt;numeric&gt;</code> algorithms.
+
+There is one additional outlier case. `reduce` has a signature which only takes
+two `InputIterator`'s and is defined as equivalent to `return reduce(first,
+last, typename iterator_traits<InputIterator>::value_type{});`. This requires
+that `InputIterator`'s value type be DefaultConstructible. `accumulate` does
+not have such a signature (by design, I believe). Ideally, I'd like to remove
+this signature, but I think it is too late to do so. I'd like to add the
+missing requirement, at least.
+
+# Wording # {#wording}
+
+Note: The following changes are relative to the post-Rapperswil 2018 working draft of ISO/IEC 14882, 
+([[N4762]]).
+
+Note: The � character is used to denote a placeholder number which shall be selected by the editor.
+
+Modify 24.2 <a href="http://eel.is/c++draft/numerics.defns">[numerics.defns]</a> as follows:
+
+<blockquote>
+<b>24.2 Definitions <span style="float: right;">[numerics.defns]</span></b>
+
+<div class="ins">
+<div class="newnumbered">
+Let `IntermediateType` be a type. Let `a1, ..., aN` and `b1, ..., bN` be expressions whose types are implicitly convertible to `IntermediateType`.
+</div>
+
+<div class="newnumbered">
+`IntermediateType` shall be  *Cpp17MoveConstructible* (Table <a href="http://eel.is/c++draft/utility.arg.requirements#tab:moveconstructible">25</a>), *Cpp17MoveAssignable* (Table <a href="http://eel.is/c++draft/utility.arg.requirements#tab:moveassignable">27</a>), and constructible from `a1`.
+</div>
+
+<div class="newnumbered">
+Let `op` is a binary function object (19.14 <a href="http://eel.is/c++draft/function.objects">[function.object]</a>) taking two arguments, the first whose type is `IntermediateType` and second whose type is implicitly convertible to `IntermediateType`, and returns a value whose type is implicitly convertible to `IntermediateType`.
+</div>
+</div>
+
+<div class="numbered">
+Define <span class="ins">the expression </span><code>GENERALIZED_NONCOMMUTATIVE_SUM<span class="ins">&lt;IntermediateType&gt;</span>(op, a1, ..., aN)</code> as follows:
+
+<ul>
+<li><code><span class="ins">IntermediateType(</span>a1<span class="ins">)</span></code> when `N` is `1`, otherwise either</li>
+<li><code><span class="ins">IntermediateType(</span>op(GENERALIZED_NONCOMMUTATIVE_SUM<span class="ins">&ltIntermediateType&gt;</span>(op, a1, ..., aK), GENERALIZED_NONCOMMUTATIVE_SUM<span class="ins">&ltIntermediateType&gt;</span>(op, aM, ..., aN))<span class="ins">)</span></code> for any `K` where `1 < K + 1 = M ≤ N`, or
+<li class="ins">initialize the accumulator `acc` whose type is `IntermediateType` with the value `a1`, modify it with `acc = op(move(acc), GENERALIZED_NONCOMMUTATIVE_SUM<IntermediateType>(op, aJ, ..., aK))` for every `[J, K)` in `[2, X), ..., [Y, N)` where `2 < X + 1 < ... < Y + 1 ≤ N` in order, and then return `acc`.</li>
+</ul>
+</div>
+
+<div class="numbered">
+Define <code>GENERALIZED_SUM<span class="ins">&lt;IntermediateType&gt;</span>(op, a1, ..., aN)</code> as <code>GENERALIZED_NONCOMMUTATIVE_SUM<span class="ins">&lt;IntermediateType&gt;</span>(op, b1, ..., bN)</code> where `b1, ..., bN` may be any permutation of `a1, ..., aN`.
+</blockquote>
+
+Modify 23.9.1 <a href="http://eel.is/c++draft/accumulate">[accumulate]</a> as follows:
+
+<blockquote>
+<b>23.9.1 Accumulate <span style="float: right;">[accumulate]</span></b>
+
+```
+template<class InputIterator, class T>
+  T accumulate(InputIterator first, InputIterator last, T init);
+template <class InputIterator, class T, class BinaryOperation>
+  T accumulate(InputIterator first, InputIterator last, T init,
+               BinaryOperation binary_op);
+```
+
+<div class="numbered">
+*Requires:* `T` shall satisfy the <i>Cpp17<span class="ins">Move</span><span class="del">Copy</span>Constructible</i> (Table <span class="ins"><a href="http://eel.is/c++draft/utility.arg.requirements#tab:moveconstructible">25</a></span><span class="del"><a href="http://eel.is/c++draft/utility.arg.requirements#tab:copyconstructible">26</a></span>) and <i>Cpp17<span class="ins">Move</span><span class="del">Copy</span>Assignable</i> (Table <span class="ins"><a href="http://eel.is/c++draft/utility.arg.requirements#tab:moveassignable">27</a></span><span class="del"><a href="http://eel.is/c++draft/utility.arg.requirements#tab:copyassignable">28</a></span>) requirements.<span class="ins"> The result of the expression `acc + *i` or `binary_op(std::move(acc), *i)` shall be implicitly convertible to `T`.</span> In the range `[first, last]`, `binary_op` shall neither modify elements nor invalidate iterators or subranges.<small><sup>240</sup></small>
+</div>
+
+<div class="numbered">
+*Effects:* Computes its result by initializing the accumulator `acc`<span class="ins">, whose type is `T`,</span> with the initial value <code><span class="ins">move(</span>init<span class="ins">)</span></code> and then modifies it with `acc = std::move(acc) + *i` or `acc = binary_op(std::move(acc), *i)` for every iterator `i` in the range `[first, last)` in order.<small><sup>241</sup></small>
+</div>
+
+<small><sup>240)</sup> The use of fully closed ranges is intentional.</small>
+
+<small><sup>241)</sup> `accumulate` is similar to the APL reduction operator and Common Lisp reduce function, but it avoids the difficulty of defining the result of reduction on an empty sequence by always requiring an initial value.</small>
+</blockquote>
+
+Modify 23.9.2 <a href="http://eel.is/c++draft/reduce">[reduce]</a> as follows:
+
+<blockquote>
+<b>23.9.2 Reduce <span style="float: right;">[reduce]</span></b>
+
+```
+template<class InputIterator>
+  typename iterator_traits<InputIterator>::value_type
+    reduce(InputIterator first, InputIterator last);
+```
+
+<div class="numbered">
+*Effects:* Equivalent to:
+
+```
+return reduce(first, last,
+              typename iterator_traits<InputIterator>::value_type{});
+```
+</div>
+
+<div class="ins">
+<div class="newnumbered">
+*Requires:* `iterator_traits<InputIterator>::value_type` shall satisfy the requirements of *Cpp17DefaultConstructible* (Table <a href="http://eel.is/c++draft/utility.arg.requirements#tab:defaultconstructible">20</a>)
+</div>
+</div>
+
+```
+template<class ExecutionPolicy, class ForwardIterator>
+  typename iterator_traits<ForwardIterator>::value_type
+    reduce(ExecutionPolicy&& exec,
+           ForwardIterator first, ForwardIterator last);
+```
+
+<div class="numbered">
+*Effects:* Equivalent to:
+
+```
+return reduce(std::forward<ExecutionPolicy>(exec), first, last,
+              typename iterator_traits<ForwardIterator>::value_type{});
+```
+</div>
+
+<div class="ins">
+<div class="newnumbered">
+*Requires:* `iterator_traits<ForwardIterator>::value_type` shall satisfy the requirements of *Cpp17DefaultConstructible* (Table <a
+href="http://eel.is/c++draft/utility.arg.requirements#tab:defaultconstructible">20</a>)
+</div>
+</div>
+
+```
+template<class InputIterator, class T>
+  T reduce(InputIterator first, InputIterator last, T init);
+```
+
+<div class="numbered">
+*Effects:* Equivalent to:
+
+```
+return reduce(first, last, init, plus<>());
+```
+</div>
+
+```
+template<class ExecutionPolicy, class ForwardIterator, class T>
+  T reduce(ExecutionPolicy&& exec,
+           ForwardIterator first, ForwardIterator last, T init);
+```
+
+<div class="numbered">
+*Effects:* Equivalent to:
+
+```
+return reduce(std::forward<ExecutionPolicy>(exec), first, last, init, plus<>());
+```
+</div>
+
+```
+template<class InputIterator, class T, class BinaryOperation>
+  T reduce(InputIterator first, InputIterator last, T init,
+           BinaryOperation binary_op);
+template<class ExecutionPolicy, class ForwardIterator, class T, class BinaryOperation>
+  T reduce(ExecutionPolicy&& exec,
+           ForwardIterator first, ForwardIterator last, T init,
+           BinaryOperation binary_op);
+```
+
+<div class="numbered">
+*Requires:* <span class="ins">`binary_op` shall neither invalidate iterators or subranges, nor modify elements in the range `[first, last]`.</span>
+
+<ul class="del">
+<li>`T` shall be *Cpp17MoveConstructible* (Table <a href="http://eel.is/c++draft/utility.arg.requirements#tab:moveconstructible">25</a>).</li>
+<li>All of `binary_op(init, *first)`, `binary_op(*first, init)`, `binary_op(init, init)`, and `binary_op(*first, *first)` shall be convertible to `T`.</li>
+<li>`binary_op` shall neither invalidate iterators or subranges, nor modify elements in the range `[first, last]`.</li>
+</ul>
+</div>
+
+<div class="numbered">
+*Returns:* <code>GENERALIZED_SUM<span class="ins">&lt;T&gt;</span>(binary_op, init, *i, ...)</code> for every `i` in `[first, last)`.
+</div>
+
+<div class="numbered">
+*Complexity:* `O(last - first)` applications of `binary_op`.
+</div>
+
+<div class="numbered">
+[ *Note:* The difference between `reduce` and `accumulate` is that `reduce` applies `binary_op` in an unspecified order, which yields a nondeterministic result for non-associative or non-commutative `binary_op` such as floating-point addition. – *end note* ]
+</div>
+</blockquote>
+
+Modify 23.9.3 <a href="http://eel.is/c++draft/inner.product">[inner.product]</a> as follows:
+
+<blockquote>
+<b>23.9.3 Inner product <span style="float: right;">[inner.product]</span></b>
+
+```
+template<class InputIterator1, class InputIterator2, class T>
+  T inner_product(InputIterator1 first1, InputIterator1 last1,
+                  InputIterator2 first2, T init);
+template<class InputIterator1, class InputIterator2, class T,
+         class BinaryOperation1, class BinaryOperation2>
+  T inner_product(InputIterator1 first1, InputIterator1 last1,
+                  InputIterator2 first2, T init,
+                  BinaryOperation1 binary_op1,
+                  BinaryOperation2 binary_op2);
+```
+
+<div class="numbered">
+*Requires:* `T` shall satisfy the <i>Cpp17<span class="ins">Move</span><span class="del">Copy</span>Constructible</i> (Table <span class="ins"><a href="http://eel.is/c++draft/utility.arg.requirements#tab:moveconstructible">25</a></span><span class="del"><a href="http://eel.is/c++draft/utility.arg.requirements#tab:copyconstructible">26</a></span>) and <i>Cpp17<span class="ins">Move</span><span class="del">Copy</span>Assignable</i> (Table <span class="ins"><a href="http://eel.is/c++draft/utility.arg.requirements#tab:moveassignable">27</a></span><span class="del"><a href="http://eel.is/c++draft/utility.arg.requirements#tab:copyassignable">28</a></span>) requirements.<span class="ins"> The result of the expression `std::move(acc) + (*i1) * (*i2)` or `binary_op1(std::move(acc), binary_op2(*i1, *i2))` shall be implicitly convertible to `T`.</span> In the ranges `[first1, last1]` and `[first2, first2 + (last1 - first1)]` `binary_op1` and `binary_op2` shall neither modify elements nor invalidate iterators or subranges.<small><sup>242</sup></small>
+</div>
+
+<div class="numbered">
+*Effects:* Computes its result by initializing the accumulator `acc`<span class="ins">, whose type is `T`,</span> with the initial value <code><span class="ins">move(</span>init<span class="ins">)</span></code> and then modifying it with `acc = std::move(acc) + (*i1) * (*i2)` or `acc = binary_op1(std::move(acc), binary_op2(*i1, *i2))` for every iterator `i1` in the range `[first1, last1)` and iterator `i2` in the range `[first2, first2 + (last1 - first1))` in order.
+</div>
+
+<small><sup>242)</sup> The use of fully closed ranges is intentional.</small>
+</blockquote>
+
+Modify 23.9.4 <a href="http://eel.is/c++draft/transform.reduce">[transform.reduce]</a> as follows:
+
+<blockquote>
+<b>23.9.4 Transform reduce <span style="float: right;">[transform.reduce]</span></b>
+
+```
+template<class InputIterator1, class InputIterator2, class T>
+  T transform_reduce(InputIterator1 first1, InputIterator1 last1,
+                     InputIterator2 first2,
+                     T init);
+```
+
+<div class="numbered">
+*Effects:* Equivalent to:
+
+```
+return transform_reduce(first1, last1, first2, init, plus<>(), multiplies<>());
+```
+</div>
+
+```
+template<class ExecutionPolicy,
+         class ForwardIterator1, class ForwardIterator2, class T>
+  T transform_reduce(ExecutionPolicy&& exec,
+                     ForwardIterator1 first1, ForwardIterator1 last1,
+                     ForwardIterator2 first2,
+                     T init);
+```
+
+<div class="numbered">
+*Effects:* Equivalent to:
+
+```
+return transform_reduce(std::forward<ExecutionPolicy>(exec),
+                        first1, last1, first2, init, plus<>(), multiplies<>());
+```
+</div>
+
+```
+template<class InputIterator1, class InputIterator2, class T,
+         class BinaryOperation1, class BinaryOperation2>
+  T transform_reduce(InputIterator1 first1, InputIterator1 last1,
+                     InputIterator2 first2,
+                     T init,
+                     BinaryOperation1 binary_op1,
+                     BinaryOperation2 binary_op2);
+template<class ExecutionPolicy,
+         class ForwardIterator1, class ForwardIterator2, class T,
+         class BinaryOperation1, class BinaryOperation2>
+  T transform_reduce(ExecutionPolicy&& exec,
+                     ForwardIterator1 first1, ForwardIterator1 last1,
+                     ForwardIterator2 first2,
+                     T init,
+                     BinaryOperation1 binary_op1,
+                     BinaryOperation2 binary_op2);
+```
+
+
+<div class="numbered">
+*Requires:* <span class="ins">Neither `binary_op1` nor `binary_op2` shall invalidate subranges, or modify elements in the ranges `[first1, last1]` and `[first2, first2 + (last1 - first1)]`.</span>
+
+<ul class="del">
+<li>`T` shall be *Cpp17MoveConstructible* (Table <a href="http://eel.is/c++draft/utility.arg.requirements#tab:moveconstructible">25</a>).</li>
+<li>All of
+<ul>
+<li>`binary_op1(init, init)`,</li>
+<li>`binary_op1(init, binary_op2(*first1, *first2))`,</li>
+<li>`binary_op1(binary_op2(*first1, *first2), init)`, and</li>
+<li>`binary_op1(binary_op2(*first1, *first2), binary_op2(*first1, *first2))`</li>
+</ul>
+shall be convertible to T.
+</li>
+<li>Neither `binary_op1` nor `binary_op2` shall invalidate subranges, or modify elements in the ranges `[first1, last1]` and `[first2, first2 + (last1 - first1)]`.</li>
+</ul>
+</div>
+
+<div class="numbered">
+*Returns:*
+
+<pre><code>
+GENERALIZED_SUM<span class="ins">&lt;T&gt;</span>(binary_op1, init, binary_op2(*i, *(first2 + (i - first1))), ...)
+</code></pre>
+
+for every iterator `i` in `[first1, last1)`.
+</div>
+
+<div class="numbered">
+*Complexity:* `O(last1 - first1)` applications each of `binary_op1` and `binary_op2`.
+</div>
+
+```
+template<class InputIterator, class T,
+         class BinaryOperation, class UnaryOperation>
+  T transform_reduce(InputIterator first, InputIterator last, T init,
+                     BinaryOperation binary_op, UnaryOperation unary_op);
+template<class ExecutionPolicy,
+         class ForwardIterator, class T,
+         class BinaryOperation, class UnaryOperation>
+  T transform_reduce(ExecutionPolicy&& exec,
+                     ForwardIterator first, ForwardIterator last,
+                     T init, BinaryOperation binary_op, UnaryOperation unary_op);
+```
+
+<div class="numbered">
+*Requires:* <span class="ins">Neither `unary_op` nor `binary_op` shall invalidate subranges, or modify elements in the ranges `[first1, last1]`.</span>
+
+<ul class="del">
+<li>`T` shall be *Cpp17MoveConstructible* (Table <a href="http://eel.is/c++draft/utility.arg.requirements#tab:moveconstructible">25</a>).</li>
+<li>All of
+<ul>
+<li>`binary_op(init, init)`,</li>
+<li>`binary_op(init, unary_op(*first))`,</li>
+<li>`binary_op(unary_op(*first), init)`, and</li>
+<li>`binary_op(unary_op(*first), unary_op(*first1, *first2))`</li>
+</ul>
+shall be convertible to T.
+</li>
+<li>Neither `unary_op` nor `binary_op` shall invalidate subranges, or modify elements in the ranges `[first1, last1]`.
+</ul>
+</div>
+
+<div class="numbered">
+*Returns:* <code>GENERALIZED_SUM<span class="ins">&lt;T&gt;</span>(binary_op, init, unary_op(*i), ...)</code> for every iterator i in [first, last).
+</div>
+
+<div class="numbered">
+*Complexity:* O(last - first) applications each of unary_op and binary_op.
+</div>
+
+<div class="numbered">
+[ *Note:* `transform_reduce` does not apply `unary_op` to `init`. — *end note* ]
+</div>
+</blockquote>
+
+Modify 23.9.5 <a href="http://eel.is/c++draft/partial.sum">[partial.sum]</a> as follows:
+
+<blockquote>
+<b>23.9.5 Partial sum <span style="float: right;">[partial.sum]</span></b>
+
+```
+template<class InputIterator, class OutputIterator>
+  OutputIterator partial_sum(
+    InputIterator first, InputIterator last,
+    OutputIterator result);
+template<class InputIterator, class OutputIterator, class BinaryOperation>
+  OutputIterator partial_sum(
+    InputIterator first, InputIterator last,
+    OutputIterator result, BinaryOperation binary_op);
+```
+
+<div class="numbered">
+*Requires:* `InputIterator`'s value type shall be <span class="ins">*Cpp17CopyConstructible* (Table <a href="http://eel.is/c++draft/utility.arg.requirements#tab:copyconstructible">26</a>) and *Cpp17MoveAssignable* (Table <a href="http://eel.is/c++draft/utility.arg.requirements#tab:moveassignable">27</a>)</span><span class="del"> constructible from the type of `*first`</span>. The result of the expression `std::move(acc) + *i` or `binary_op(std::move(acc), *i)` shall be implicitly convertible to `InputIterator`'s value type. `acc` shall be writable (22.2.1 <a href="http://eel.is/c++draft/iterator.requirements.general">[iterator.requirements.general]</a>) to the `result` output iterator. In the ranges `[first, last]` and `[result, result + (last - first)]` `binary_op` shall neither modify elements nor invalidate iterators or subranges.<small><sup>243</sup></small>
+</div>
+
+<div class="numbered">
+*Effects:* For a non-empty range, the function creates an accumulator `acc` whose type is `InputIterator`'s value type, initializes it with `*first`, and assigns the result to `*result`. For every iterator `i` in `[first + 1, last)` in order, `acc` is then modified by `acc = std::move(acc) + *i` or `acc = binary_op(std::move(acc), *i)` and the result is assigned to `*(result + (i - first))`.
+</div>
+<div class="numbered">
+*Returns:* `result + (last - first)`.
+</div>
+
+<div class="numbered">
+*Complexity:* Exactly `(last - first) - 1` applications of the binary operation.
+</div>
+
+<div class="numbered">
+*Remarks:* `result` may be equal to `first`.
+</div>
+
+<small><sup>243)</sup> The use of fully closed ranges is intentional.</small>
+</blockquote>
+
+Modify 23.9.6 <a href="http://eel.is/c++draft/exclusive.scan">[exclusive.scan]</a> as follows:
+
+<blockquote>
+<b>23.9.6 Exclusive scan <span style="float: right;">[exclusive.scan]</span></b>
+
+```
+template<class InputIterator, class OutputIterator, class T>
+  OutputIterator exclusive_scan(InputIterator first, InputIterator last,
+                                OutputIterator result, T init);
+```
+
+<div class="numbered">
+*Effects:* Equivalent to:
+
+```
+return exclusive_scan(first, last, result, init, plus<>());
+```
+</div>
+
+```
+template<class ExecutionPolicy, class ForwardIterator1, class ForwardIterator2, class T>
+  ForwardIterator2 exclusive_scan(ExecutionPolicy&& exec,
+                                  ForwardIterator1 first, ForwardIterator1 last,
+                                  ForwardIterator2 result, T init);
+```
+
+<div class="numbered">
+*Effects:* Equivalent to:
+
+```
+return exclusive_scan(std::forward<ExecutionPolicy>(exec),
+                      first, last, result, init, plus<>());
+```
+</div>
+
+```
+template<class InputIterator, class OutputIterator, class T, class BinaryOperation>
+  OutputIterator exclusive_scan(InputIterator first, InputIterator last,
+                                OutputIterator result, T init, BinaryOperation binary_op);
+template<class ExecutionPolicy,
+         class ForwardIterator1, class ForwardIterator2, class T, class BinaryOperation>
+  ForwardIterator2 exclusive_scan(ExecutionPolicy&& exec,
+                                  ForwardIterator1 first, ForwardIterator1 last,
+                                  ForwardIterator2 result, T init, BinaryOperation binary_op);
+```
+
+<div class="numbered">
+*Requires:*
+
+<ul>
+<li class="del">`T` shall be *Cpp17MoveConstructible* (Table <a href="http://eel.is/c++draft/utility.arg.requirements#tab:moveconstructible">25</a>).</li>
+<li class="del">All of `binary_op(init, init)`, `binary_op(init, *first)`, and `binary_op(*first, *first)` shall be convertible to `T`.</li>
+<li class="ins">`T` shall be writable (22.2.1 <a href="http://eel.is/c++draft/iterator.requirements.general">[iterator.requirements.general]</a>) to the `result` output iterator.</li>
+<li>`binary_op` shall neither invalidate iterators or subranges, nor modify elements in the range `[first, last]` or `[result, result + (last - first)]`.</li>
+</ul>
+</div>
+
+<div class="numbered">
+*Effects:* For each integer `K` in `[0, last - first)` assigns through `result + K` the value of:
+
+<pre><code>
+GENERALIZED_NONCOMMUTATIVE_SUM<span class="ins">&lt;T&gt;</span>(
+    binary_op, init, *(first + 0), *(first + 1), ..., *(first + K - 1))
+</code></pre>
+</div>
+
+<div class="numbered">
+*Returns:* The end of the resulting range beginning at `result`.
+</div>
+
+<div class="numbered">
+*Complexity:* `O(last - first)` applications of `binary_op`.
+</div>
+
+<div class="numbered">
+*Remarks:* `result` may be equal to `first`.
+</div>
+
+<div class="numbered">
+[ *Note:* The difference between `exclusive_scan` and `inclusive_scan` is that `exclusive_scan` excludes the *i*<sup>th</sup> input element from the *i*<sup>th</sup> sum. If `binary_op` is not mathematically associative, the behavior of `exclusive_scan` may be nondeterministic. — *end note* ]
+</div>
+</blockquote>
+
+Modify 23.9.7 <a href="http://eel.is/c++draft/inclusive.scan">[inclusive.scan]</a> as follows:
+
+<blockquote>
+<b>23.9.7 Inclusive scan <span style="float: right;">[inclusive.scan]</span></b>
+
+```
+template<class InputIterator, class OutputIterator>
+  OutputIterator inclusive_scan(InputIterator first, InputIterator last, OutputIterator result);
+```
+
+<div class="numbered">
+*Effects:* Equivalent to:
+
+```
+return inclusive_scan(first, last, result, plus<>());
+```
+</div>
+
+```
+template<class ExecutionPolicy, class ForwardIterator1, class ForwardIterator2>
+  ForwardIterator2 inclusive_scan(ExecutionPolicy&& exec,
+                                ForwardIterator1 first, ForwardIterator1 last,
+                                ForwardIterator2 result);
+```
+
+<div class="numbered">
+*Effects:* Equivalent to:
+
+```
+return inclusive_scan(std::forward<ExecutionPolicy>(exec), first, last, result, plus<>());
+```
+</div>
+
+```
+template<class InputIterator, class OutputIterator, class BinaryOperation>
+  OutputIterator inclusive_scan(InputIterator first, InputIterator last,
+                                OutputIterator result, BinaryOperation binary_op);
+template<class ExecutionPolicy, class ForwardIterator1, class ForwardIterator2,
+         class BinaryOperation>
+  ForwardIterator2 inclusive_scan(ExecutionPolicy&& exec,
+                                  ForwardIterator1 first, ForwardIterator1 last,
+                                  ForwardIterator2 result, BinaryOperation binary_op);
+
+template<class InputIterator, class OutputIterator, class BinaryOperation, class T>
+  OutputIterator inclusive_scan(InputIterator first, InputIterator last,
+                                OutputIterator result, BinaryOperation binary_op, T init);
+template<class ExecutionPolicy,
+         class ForwardIterator1, class ForwardIterator2, class BinaryOperation, class T>
+  ForwardIterator2 inclusive_scan(ExecutionPolicy&& exec,
+                                  ForwardIterator1 first, ForwardIterator1 last,
+                                  ForwardIterator2 result, BinaryOperation binary_op, T init);
+```
+
+<div class="ins">
+<div class="newnumbered">
+If `init` is not provided, `T` is the value type of `decltype(*first)`.
+</div>
+</div>
+
+<div class="numbered">
+*Requires:*
+
+<ul>
+<li class="del">If `init` is provided, `T` shall be *Cpp17MoveConstructible* (Table <a href="http://eel.is/c++draft/utility.arg.requirements#tab:moveconstructible">25</a>); otherwise, `ForwardIterator1`'s value type shall be *Cpp17MoveConstructible*.</li>
+<li class="del">If `init` is provided, all of `binary_op(init, init)`, `binary_op(init, *first)`, and `binary_op(*first, *first)` shall be convertible to `T`; otherwise, `binary_op(*first, *first)` shall be convertible to `ForwardIterator1`'s value type.</li>
+<li class="ins">`T` shall be writable (22.2.1 <a href="http://eel.is/c++draft/iterator.requirements.general">[iterator.requirements.general]</a>) to the `result` output iterator.</li>
+<li>`binary_op` shall neither invalidate iterators or subranges, nor modify elements in the range `[first, last]` or `[result, result + (last - first)]`.</li>
+</ul>
+
+</div>
+
+<div class="numbered">
+*Effects:* For each integer `K` in `[0, last - first)` assigns through `result + K` the value of
+
+<ul>
+<li>
+<pre><code>
+GENERALIZED_NONCOMMUTATIVE_SUM<span class="ins">&lt;T&gt;</span>(
+  binary_op, init, *(first + 0), *(first + 1), ..., *(first + K))
+</code></pre>
+if `init` is provided, or
+</li>
+<li>
+<pre><code>
+GENERALIZED_NONCOMMUTATIVE_SUM<span class="ins">&lt;T&gt;</span>(
+  binary_op, *(first + 0), *(first + 1), ..., *(first + K))
+</code></pre>
+otherwise.
+</li>
+</ul>
+</div>
+
+<div class="numbered">
+*Returns:* The end of the resulting range beginning at `result`.
+</div>
+
+<div class="numbered">
+*Complexity:* `O(last - first)` applications of `binary_op`.
+</div>
+
+<div class="numbered">
+*Remarks:* `result` may be equal to `first`.
+</div>
+
+<div class="numbered">
+[ *Note:* The difference between `exclusive_scan` and `inclusive_scan` is that `inclusive_scan` includes the *i*<sup>th</sup> input element in the *i*<sup>th</sup> sum. If `binary_op` is not mathematically associative, the behavior of `inclusive_scan` may be nondeterministic. — *end note* ]
+</div>
+</blockquote>
+
+Modify 23.9.8 <a href="http://eel.is/c++draft/transform.exclusive.scan">[transform.exclusive.scan]</a> as follows:
+
+<blockquote>
+<b>23.9.8 Transform exclusive scan <span style="float: right;">[transform.exclusive.scan]</span></b>
+
+```
+template<class InputIterator, class OutputIterator, class T,
+         class BinaryOperation, class UnaryOperation>
+  OutputIterator transform_exclusive_scan(InputIterator first, InputIterator last,
+                                          OutputIterator result, T init,
+                                          BinaryOperation binary_op,UnaryOperation unary_op);
+template<class ExecutionPolicy,
+         class ForwardIterator1, class ForwardIterator2, class T,
+         class BinaryOperation, class UnaryOperation>
+  ForwardIterator2 transform_exclusive_scan(ExecutionPolicy&& exec,
+                                            ForwardIterator1 first, ForwardIterator1 last,
+                                            ForwardIterator2 result, T init,
+                                            BinaryOperation binary_op, UnaryOperation unary_op);
+```
+
+<div class="numbered">
+*Requires:*
+
+<ul>
+<li class="del">`T` shall be *Cpp17MoveConstructible* (Table <a href="http://eel.is/c++draft/utility.arg.requirements#tab:moveconstructible">25</a>).</li>
+<li class="del">All of
+<ul>
+<li>`binary_op(init, init)`,</li>
+<li>`binary_op(init, unary_op(*first))`, and</li>
+<li>`binary_op(unary_op(*first), unary_op(*first))`</li>
+</ul>
+shall be convertible to `T`.
+</li>
+<li class="ins">`T` shall be writable (22.2.1 <a href="http://eel.is/c++draft/iterator.requirements.general">[iterator.requirements.general]</a>) to the `result` output iterator.</li>
+<li>Neither `unary_op` nor `binary_op` shall invalidate iterators or subranges, nor modify elements in the range `[first, last]` or `[result, result + (last - first)]`.</li>
+</ul>
+</div>
+
+<div class="numbered">
+*Effects:* For each integer `K` in `[0, last - first)` assigns through `result + K` the value of:
+
+<pre><code>
+GENERALIZED_NONCOMMUTATIVE_SUM<span class="ins">&lt;T&gt;</span>(
+    binary_op, init,
+    unary_op(*(first + 0)), unary_op(*(first + 1)), ..., unary_op(*(first + K - 1)))
+</code></pre>
+</div>
+
+<div class="numbered">
+*Returns:* The end of the resulting range beginning at `result`.
+</div>
+
+<div class="numbered">
+*Complexity:* `O(last - first)` applications each of `unary_op` and `binary_op`.
+</div>
+
+<div class="numbered">
+*Remarks:* `result` may be equal to `first`.
+</div>
+
+<div class="numbered">
+[ *Note:* The difference between `transform_exclusive_scan` and `transform_inclusive_scan` is that `transform_exclusive_scan` excludes the *i*<sup>th</sup> input element from the *i*<sup>th</sup> sum. If `binary_op` is not mathematically associative, the behavior of `exclusive_scan` may be nondeterministic. `transform_exclusive_scan` does not apply `unary_op` to `init`. — *end note* ]
+</div>
+</blockquote>
+
+Modify 23.9.9 <a href="http://eel.is/c++draft/transform.inclusive.scan">[transform.inclusive.scan]</a> as follows:
+
+<blockquote>
+<b>23.9.9 Transform inclusive scan <span style="float: right;">[transform.inclusive.scan]</span></b>
+
+```
+template<class InputIterator, class OutputIterator,
+         class BinaryOperation, class UnaryOperation>
+  OutputIterator transform_inclusive_scan(InputIterator first, InputIterator last,
+                                          OutputIterator result,
+                                          BinaryOperation binary_op, UnaryOperation unary_op);
+template<class ExecutionPolicy,
+         class ForwardIterator1, class ForwardIterator2,
+         class BinaryOperation, class UnaryOperation>
+  ForwardIterator2 transform_inclusive_scan(ExecutionPolicy&& exec,
+                                            ForwardIterator1 first, ForwardIterator1 last,
+                                            ForwardIterator2 result,
+                                            BinaryOperation binary_op, UnaryOperation unary_op);
+template<class InputIterator, class OutputIterator,
+         class BinaryOperation, class UnaryOperation, class T>
+  OutputIterator transform_inclusive_scan(InputIterator first, InputIterator last,
+                                          OutputIterator result,
+                                          BinaryOperation binary_op, UnaryOperation unary_op,
+                                          T init);
+template<class ExecutionPolicy,
+         class ForwardIterator1, class ForwardIterator2,
+         class BinaryOperation, class UnaryOperation, class T>
+  ForwardIterator2 transform_inclusive_scan(ExecutionPolicy&& exec,
+                                            ForwardIterator1 first, ForwardIterator1 last,
+                                            ForwardIterator2 result,
+                                            BinaryOperation binary_op, UnaryOperation unary_op,
+                                            T init);
+```
+
+<div class="ins">
+<div class="newnumbered">
+If `init` is not provided, `T` is the value type of `decltype(*first)`.
+</div>
+</div>
+
+<div class="numbered">
+*Requires:*
+
+<ul>
+<li class="del">If `init` is provided, `T` shall be *Cpp17MoveConstructible* (Table <a href="http://eel.is/c++draft/utility.arg.requirements#tab:moveconstructible">25</a>); otherwise, `ForwardIterator1`'s value type shall be *Cpp17MoveConstructible*.</li>
+<li class="del">If `init` is provided, all of
+<ul>
+<li>`binary_op(init, init)`,</li>
+<li>`binary_op(init, *first)`, and</li>
+<li>`binary_op(*first, *first)`</li>
+</ul>
+shall be convertible to `T`; otherwise, `binary_op(unary_op(*first), unary_op(*first))` shall be convertible to `ForwardIterator1`'s value type.
+</li>
+<li class="ins">`T` shall be writable (22.2.1 <a href="http://eel.is/c++draft/iterator.requirements.general">[iterator.requirements.general]</a>) to the `result` output iterator.</li>
+<li>Neither `unary_op` nor `binary_op` shall invalidate iterators or subranges, nor modify elements in the range `[first, last]` or `[result, result + (last - first)]`.</li>
+</ul>
+</div>
+
+<div class="numbered">
+*Effects:* For each integer `K` in `[0, last - first)` assigns through `result + K` the value of
+
+<ul>
+<li>
+<pre><code>
+GENERALIZED_NONCOMMUTATIVE_SUM<span class="ins">&lt;T&gt;</span>(
+    binary_op, init,
+    unary_op(*(first + 0)), unary_op(*(first + 1)), ..., unary_op(*(first + K)))
+</code></pre>
+if `init` is provided, or
+</li>
+<li>
+<pre><code>
+GENERALIZED_NONCOMMUTATIVE_SUM<span class="ins">&lt;T&gt;</span>(
+    binary_op,
+    unary_op(*(first + 0)), unary_op(*(first + 1)), ..., unary_op(*(first + K)))
+</code></pre>
+otherwise.
+</li>
+</ul>
+</div>
+
+<div class="numbered">
+*Returns:* The end of the resulting range beginning at `result`.
+</div>
+
+<div class="numbered">
+*Complexity:* `O(last - first)` applications each of `unary_op` and `binary_op`.
+</div>
+
+<div class="numbered">
+*Remarks:* `result` may be equal to `first`.
+</div>
+
+<div class="numbered">
+[ *Note:* The difference between `transform_exclusive_scan` and `transform_inclusive_scan` is that `transform_inclusive_scan` includes the *i*<sup>th</sup> input element in the *i*<sup>th</sup> sum. If `binary_op` is not mathematically associative, the behavior of `inclusive_scan` may be nondeterministic. `transform_inclusive_scan` does not apply `unary_op` to `init`. — *end note* ]
+</div>
+</blockquote>
+
+Modify 23.9.10 <a href="http://eel.is/c++draft/adjacent.difference">[adjacent.difference]</a> as follows:
+
+<blockquote>
+<b>23.9.10 Adjacent difference <span style="float: right;">[adjacent.difference]</span></b>
+
+```
+template<class InputIterator, class OutputIterator>
+  OutputIterator
+    adjacent_difference(InputIterator first, InputIterator last, OutputIterator result);
+template<class ExecutionPolicy, class ForwardIterator1, class ForwardIterator2>
+  ForwardIterator2
+    adjacent_difference(ExecutionPolicy&& exec,
+                        ForwardIterator1 first, ForwardIterator1 last, ForwardIterator2 result);
+
+template<class InputIterator, class OutputIterator, class BinaryOperation>
+  OutputIterator
+    adjacent_difference(InputIterator first, InputIterator last,
+                        OutputIterator result, BinaryOperation binary_op);
+template<class ExecutionPolicy, class ForwardIterator1, class ForwardIterator2,
+         class BinaryOperation>
+  ForwardIterator2
+    adjacent_difference(ExecutionPolicy&& exec,
+                        ForwardIterator1 first, ForwardIterator1 last,
+                        ForwardIterator2 result, BinaryOperation binary_op);
+```
+
+<div class="numbered">
+Let `T` be the value type of <code>decltype(<span class="ins">*</span>first)</code>. For the overloads that do not take an argument `binary_op`, let `binary_op` be an lvalue that denotes an object of type `minus<>`.
+</div>
+
+<div class="numbered">
+*Requires:*
+<ul>
+<li>For the overloads with no `ExecutionPolicy`, `T` shall be *Cpp17MoveAssignable* (Table <a href="http://eel.is/c++draft/utility.arg.requirements#tab:moveassignable">27</a>)  and shall be constructible from the type of `*first`. `acc` (defined below) shall be writable (22.2.1 <a href="http://eel.is/c++draft/iterator.requirements.general">[iterator.requirements.general]</a>) to the `result` output iterator.</li>
+<li>The result of the expression `binary_op(val, std::move(acc))` shall be writable to the `result` output iterator.</li>
+<li>For the overloads with an `ExecutionPolicy`, the result of the expressions `binary_op(*first, *first)` and `*first` shall be writable to `result`.</li>
+<li>For all overloads, in the ranges `[first, last]` and `[result, result + (last - first)]`, `binary_op` shall neither modify elements nor invalidate iterators or subranges.<small><sup>244</sup></small></li>
+<li class="ins">For the overloads with an `ExecutionPolicy`, the ranges `[first, last)` and `[result, result + (last - first))` shall not overlap.</li>
+</ul>
+</div>
+
+<div class="numbered">
+*Effects:* For the overloads with no `ExecutionPolicy` and a non-empty range, the function creates an accumulator `acc` of type `T`, initializes it with `*first`, and assigns the result to `*result`. For every iterator `i` in `[first + 1, last)` in order, creates an object `val` whose type is `T`, initializes it with `*i`, computes `binary_op(val, std::move(acc))`, assigns the result to `*(result + (i - first))`, and move assigns from `val` to `acc`.
+</div>
+
+<div class="numbered">
+For the overloads with an `ExecutionPolicy` and a non-empty range, performs `*result = *first`. Then, for every `d` in `[1, last - first - 1]`, performs `*(result + d) = binary_­op(*(first + d), *(first + (d - 1)))`.
+</div>
+
+<div class="numbered">
+*Returns:* `result + (last - first)`.
+</div>
+
+<div class="numbered">
+*Complexity:* Exactly `(last - first) - 1` applications of the binary operation.
+</div>
+
+<div class="numbered">
+*Remarks:* For the overloads with no `ExecutionPolicy`, `result` may be equal to `first`.<span class="del">For the overloads with an `ExecutionPolicy`, the ranges `[first, last)` and `[result, result + (last - first))` shall not overlap.</span>
+</div>
+
+<small><sup>244)</sup> The use of fully closed ranges is intentional.</small>
+</blockquote>
+
+## Questions for LWG ## {#questions}
+
+- Do we `std::` qualify things in library wording, like `move` and `forward`?
+- Do we prefer to say "`Iterator`'s value type" or "`typename iterator_traits<Iterator>::value_type`".
+- The "use of fully closed ranges is intentional" notes are used inconsistently - should they be everywhere?
