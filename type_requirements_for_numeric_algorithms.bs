@@ -7,9 +7,9 @@ Distributed under the Boost Software License v1.0 (boost.org/LICENSE_1_0.txt)
 <pre class='metadata'>
 Title: Type Requirements for `&lt;numeric&gt;` Algorithms
 H1: Type Requirements for <code>&lt;numeric&gt;</code> Algorithms
-Shortname: P0571
-Revision: 2
-Status: P
+Shortname: D0571
+Revision: 3
+Status: D
 Group: WG21
 Audience: LWG, LEWG, SG1
 Editor: Bryce Adelstein Lelbach, NVIDIA, brycelelbach@gmail.com
@@ -234,7 +234,7 @@ Alternative choices for the intermediate type are:
     functionality desired by the user in the `big_int` example.
 
 Switching to either of these alternatives would force implementations to make
-breaking changes, and neither option seems particular attractive.
+breaking changes, and neither option seems particularly attractive.
 
 I suggest adopting the following design. It is simple and clear to both users
 and implementators:
@@ -329,7 +329,7 @@ to use for the intermediate type is likely the wrong thing to do because it mean
 the user does not have a clear answer to the question "What type will you use to
 perform the accumulation?".
 
-Since the `OutputIterator` has no value type by virture of being an output
+Since the `OutputIterator` has no value type by virtue of being an output
 iterator, I cannot think of any other options for the intermediate type for the
 algorithms without initial value parameters other than the status quo of the
 `InputIterator`'s value type.
@@ -374,7 +374,7 @@ A possible post-C++17 addition of `partial_sum` signatures accepting an initial
 value parameter would complete this functionality.
 
 I believe the best option is to keep the existing behavior for
-<code>&lt;numeric&gt;</code> algorithm which do not take an initial value
+<code>&lt;numeric&gt;</code> algorithms which do not take an initial value
 parameter.  Making any change to the type of the accumulator object would be a
 breaking change as `parital_sum` and `adjacent_difference` are currently
 specified to use accumulator objects whose type is the `InputIterator`'s value
@@ -406,7 +406,7 @@ This is particularly scary in the face of the arbitrary reordering and partition
 that `GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM` allow. Consider:
 
 ```
-vector<int> i{INT_MAX, INT_MAX, INT_MAX, INT_MAX};
+vector<int> d{INT_MAX, INT_MAX, INT_MAX, INT_MAX};
 big_int bi = reduce(d.begin(), d.end(), big_int(0));
 
 // Possible result
@@ -448,7 +448,7 @@ example. Note that in addition to performing some of the calculations with
 `int` as the intermediate type, `reduce` also called `binary_op` with the
 initial value type as the **second** argument and the element from the sequence
 (whose type is the `InputIterators`'s value type) as the **first** argument.
-The ordered algorithms always pass intermediate objects as the first argmuent
+The ordered algorithms always pass intermediate objects as the first argument
 to the binary operator. It seems sensible that we should use the same rules I
 suggested for the ordered algorithms ([[#intermediate_policy]]). Note that the
 `N == 1` case intentionally does not convert to `IntermediateType`,
@@ -509,9 +509,9 @@ be for each <code>&lt;numeric&gt;</code> algorithm
 ([[#intermediate_policy]]), we can describe their requirements:
 
 * Operators shall neither modify elements nor invalidate iterators or subranges in the iterator ranges specified by their parameters.
-* The intermediate type shall be CopyConstructible (in-order-accumulator algorithms that take an initial value), constructible from `*first` (in-order-accumulator algorithms that do not take an initial value), or constructible from `op(GENERALIZED_NONCOMMUTATIVE_SUM(op, a1, ..., aK), GENERALIZED_NONCOMMUTATIVE_SUM(op, aM, ..., aN))` (`GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM` algorithms). This requirement comes from the initialization of the accumulator object (in-order accumulator algorithms) or from the conversion to `IntermediateType` (`GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM` algorithms).
+* The intermediate type shall be CopyConstructible (in-order-accumulator algorithms that take an initial value), constructible from `*first` (in-order-accumulator algorithms that do not take an initial value), or constructible from `op(GENERALIZED_NONCOMMUTATIVE_SUM(op, a1, ..., aK), GENERALIZED_NONCOMMUTATIVE_SUM(op, a(k + 1), ..., aN))` (`GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM` algorithms). This requirement comes from the initialization of the accumulator object (in-order accumulator algorithms) or from the conversion to `IntermediateType` (`GENERALIZED_NONCOMMUTATIVE_SUM` and `GENERALIZED_SUM` algorithms).
 * The right hand side of the update expression must be convertible to the intermediate type (all in-order-accumulator algorithms). This requirement comes from the update expression (the right hand side of `acc = binary_op(acc, *i)`).
-* The intermediate type must be CopyAssignable (all in-order-accumulator algorithms except adjacent_difference) or MoveAssignable (adjacent_difference). This requirement comes from the update expression (the assignment in `acc = binary_op(acc, *i)`).
+* The intermediate type must be CopyAssignable (all in-order-accumulator algorithms except `adjacent_difference`) or MoveAssignable (`adjacent_difference`). This requirement comes from the update expression (the assignment in `acc = binary_op(acc, *i)`).
 * The intermediate type shall be writable to the result output iterator (for algorithms which take an output range). This requirement comes from the write to the output iterator that is performed each iteration in these algorithms.
 
 For the function objects, we've already specified the requirements for what the return type of the invocations of `binary_op` should be. We just need to require that:
