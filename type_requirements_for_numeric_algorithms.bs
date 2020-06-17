@@ -162,7 +162,7 @@ Define <code>GENERALIZED_NONCOMMUTATIVE_SUM(op, a1, ..., aN)</code> as follows:
 
 <ul>
 <li><code>a1</code> when `N` is `1`, otherwise either</li>
-<li><code>op(GENERALIZED_NONCOMMUTATIVE_SUM(op, a1, ..., aK), GENERALIZED_NONCOMMUTATIVE_SUM</code> for any `K` where `1 < K + 1 = M ≤ N`, or
+<li><code>op(GENERALIZED_NONCOMMUTATIVE_SUM(op, a1, ..., aK), GENERALIZED_NONCOMMUTATIVE_SUM)</code> for any `K` where `1 < K + 1 = M ≤ N`, or
 </ul>
 </div>
 
